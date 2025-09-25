@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Half‑QR Snow</title>
+  <style>
+    /* --- Base --- */
+    :root{
+      --bg: #ffffff;
+      --ink: #111111;
+      --max-flakes: 72;
+      --lifetime: 10s; /* disappearance time */
+    }
+    html,body{height:100%}
+    body{
+      margin:0; background:var(--bg); color:#000; overflow:hidden; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+    }
+
+    /* Optional tiny watermark toggleable via comment */
+    .brand{position:fixed; left:12px; bottom:10px; font-size:12px; color:#999; user-select:none; pointer-events:none}
+
+    /* Container for floating bits */
+    #field{position:fixed; inset:0; overflow:hidden}
+
+    /* Each flake is absolutely positioned */
+    .flake{position:absolute; will-change: transform, opacity; filter: drop-shadow(0 2px 2px rgba(0,0,0,.06));}
+
+    /* Animation: drift downward with subtle sway and melt away */
+    @keyframes drift {
+      0%   { transform: translate(var(--x,0), -10vh) rotate(var(--rot)); opacity: 0 }
+      8%   { opacity: var(--op) }
+      50%  { transform: translate(calc(var(--x) + var(--sway)), 50vh) rotate(calc(var(--rot) + 8deg)); }
+      92%  { opacity: var(--op) }
+      100% { transform: translate(calc(var(--x) + var(--sway)), 110vh) rotate(calc(var(--rot) + 12deg)); opacity: 0 }
+    }
+
+    .flake.animate{ animation: drift var(--life, var(--lifetime)) linear forwards; }
+
+    /* Reduce motion for accessibility */
+    @media (prefers-reduced-motion: reduce){
+      .flake.animate{ animation-duration: calc(var(--life, var(--lifetime)) * 0.6); }
+      @keyframes drift{
+        0%{ transform: translate(var(--x,0), -10vh); opacity: 0 }
+        8%{ opacity: var(--op) }
+        100%{ transform: translate(var(--x,0), 110vh); opacity: 0 }
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="field" aria-hidden="true"></div>
+  <!-- <div class="brand">Half‑QR Snow</div> -->
+
+  <script>
+    // Colour palette for accents (soft but vivid against white)
+    const PALETTE = ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#22c55e'];
+
+    // Half‑QR generator (fake QR look): draws a 21x21 module grid with finder patterns & random noise
+    function makeQrSVG(module = 4, modules = 21, accent = '#3b82f6', accentRatio = 0.28){
+      const size = modules * module;
+      const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      svg.setAttribute('width', size);
+      svg.setAttribute('height', size);
+      svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+      svg.setAttribute('aria-hidden','true');
+      svg.style.display = 'block';
+      // background
+      const bg = document.createElementNS(svg.namespaceURI,'rect');
+      bg.setAttribute('x',0); bg.setAttribute('y',0); bg.setAttribute('width',size); bg.setAttribute('height',size);
+      bg.setAttribute('fill','#fff');
+      svg.appendChild(bg);
+
+      const group = document.createElementNS(svg.namespaceURI,'g');
+
+      const drawRect = (cx,cy,w,h,fill)=>{
+        const r = document.createElementNS(svg.namespaceURI,'rect');
+        r.setAttribute('x', cx*module);
+        r.setAttribute('y', cy*module);
+        r.setAttribute('width', w*module);
+        r.setAttribute('height', h*module);
+        r.setAttribute('fill', fill);
+        group.appendChild(r);
+      };
+
+      const INK = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#111';
+
+      // Finder patterns (TL, TR, BL) for QR vibe (kept in INK for legibility)
+      const finder = (ox,oy)=>{
+        drawRect(ox,oy,7,7, INK);
+        drawRect(ox+1,oy+1,5,5, '#fff');
+        drawRect(ox+2,oy+2,3,3, INK);
+      };
+      finder(0,0);
+      finder(modules-7,0);
+      finder(0,modules-7);
+
+      // Timing pattern rows/cols approximate (INK)
+      for(let i=8;i<modules-8;i++){
+        if(i%2===0){ drawRect(i,6,1,1, INK); drawRect(6,i,1,1, INK); }
+      }
+
+      // Random modules as noise/data (skip finder zones)
+      function inFinderZone(x,y){
+        const z = (x<7 && y<7) || (x>=modules-7 && y<7) || (x<7 && y>=modules-7);
+        return z || x===6 || y===6; // also avoid timing lines
+      }
+      for(let y=0;y<modules;y++){
+        for(let x=0;x<modules;x++){
+          if(inFinderZone(x,y)) continue;
+          if(Math.random()>0.62){
+            // Choose accent for a subset to create coloured speckles
+            const fill = Math.random() < accentRatio ? accent : INK;
+            drawRect(x,y,1,1, fill);
+          }
+        }
+      }
+
+      svg.appendChild(group);
+      return svg;
+    }
+
+    // Create a half‑QR flake element (TOP/BOTTOM ONLY)
+    function makeHalfQrFlake(){
+      const flake = document.createElement('div');
+      flake.className = 'flake';
+
+      // Size & accent
+      const module = Math.floor(3 + Math.random()*3); // 3..5 px per module
+      const accent = PALETTE[Math.floor(Math.random()*PALETTE.length)];
+      const svg = makeQrSVG(module, 21, accent, 0.30);
+
+      // Randomly clip to half — TOP or BOTTOM only
+      const topHalf = Math.random() < 0.5;
+      const clip = topHalf ? 'inset(0 0 50% 0)' : 'inset(50% 0 0 0)';
+      svg.style.clipPath = clip;
+      svg.style.webkitClipPath = clip;
+
+      // Slight rotation & opacity
+      const rot = (Math.random()*24 - 12).toFixed(2) + 'deg';
+      const op = (0.45 + Math.random()*0.4).toFixed(2);
+
+      // Position and motion vars
+      const startX = (Math.random()*100).toFixed(2) + 'vw';
+      const sway = (Math.random()>0.5? 1.2 : -1.2) * (0.6 + Math.random()); // vw sway amount
+      const lifetime = getComputedStyle(document.documentElement).getPropertyValue('--lifetime').trim() || '10s';
+
+      flake.style.setProperty('--x', startX);
+      flake.style.setProperty('--sway', sway + 'vw');
+      flake.style.setProperty('--rot', rot);
+      flake.style.setProperty('--op', op);
+      flake.style.setProperty('--life', lifetime);
+
+      // Random start height slightly above the top
+      const offsetY = (-5 - Math.random()*25).toFixed(1) + 'vh';
+      flake.style.transform = `translate(${startX}, ${offsetY}) rotate(${rot})`;
+      flake.style.opacity = 0;
+
+      flake.appendChild(svg);
+      return flake;
+    }
+
+    const field = document.getElementById('field');
+    let count = 0;
+
+    function spawn(){
+      if(count >= parseInt(getComputedStyle(document.documentElement).getPropertyValue('--max-flakes'))){
+        return; // cap to avoid overload
+      }
+      const flake = makeHalfQrFlake();
+      field.appendChild(flake);
+      requestAnimationFrame(()=>{ flake.classList.add('animate'); });
+      count++;
+      // Remove after lifetime (~10s)
+      const lifeMs = 10000; // strictly 10s disappearance
+      setTimeout(()=>{ flake.remove(); count--; }, lifeMs);
+    }
+
+    // Spawn loop
+    const spawnEveryMs = 180; // density
+    const timer = setInterval(()=>{
+      spawn();
+      if(Math.random() < 0.08) spawn(); // occasional extra
+    }, spawnEveryMs);
+
+    // Click anywhere to spawn a burst
+    field.addEventListener('click', ()=>{ for(let i=0;i<6;i++) setTimeout(spawn, i*40); });
+
+    // Dev helpers
+    window.setDensity = (n)=>{ document.documentElement.style.setProperty('--max-flakes', String(n)); };
+    window.setLifetime = (sec)=>{ document.documentElement.style.setProperty('--lifetime', sec+'s'); };
+  </script>
+</body>
+</html>
