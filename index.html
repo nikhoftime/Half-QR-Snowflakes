@@ -1,201 +1,254 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Half-QR Snow</title>
-  <style>
-    :root{
-      --bg: #ffffff;
-      --ink: #111111;
-      --max-flakes: 36;     /* cap how many flakes exist at once */
-      --lifetime: 10s;      /* time before auto-melt/remove */
-    }
-    html,body{height:100%}
-    body{
-      margin:0; background:var(--bg); color:#000; overflow:hidden;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
-    }
-    #field{position:fixed; inset:0; overflow:hidden}
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Half-QR Snow — Find the Match</title>
+<style>
+  :root{
+    --bg:#ffffff;
+    --ink:#111111;
+    --max-flakes:12;   /* fewer flakes overall */
+    --lifetime:10s;    /* auto-melt time */
+  }
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:#000;overflow:hidden;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
 
-    /* Each flake is its own half-height crop box containing a full SVG */
-    .flake{
-      position:absolute; will-change: transform, opacity;
-      overflow:hidden; display:block; filter: drop-shadow(0 2px 2px rgba(0,0,0,.06));
-      pointer-events:auto; /* so clicks register */
-    }
+  #field{position:fixed;inset:0;overflow:hidden}
+  .flake{
+    position:absolute;will-change:transform,opacity;overflow:hidden;display:block;
+    filter:drop-shadow(0 2px 2px rgba(0,0,0,.06));pointer-events:auto;
+  }
 
-    /* Motion = drift; Opacity = melt (separate for reliability) */
-    .flake.animate{
-      animation:
-        drift var(--life, var(--lifetime)) linear forwards,
-        melt  var(--life, var(--lifetime)) ease-in forwards;
-    }
+  /* Motion (position) */
+  .flake.animate{
+    animation:
+      drift var(--life, var(--lifetime)) linear forwards,
+      melt  var(--life, var(--lifetime)) ease-in forwards;
+  }
+  @keyframes drift{
+    0%{transform:translate(var(--x,0vw), -12vh) rotate(var(--rot,0deg))}
+    50%{transform:translate(calc(var(--x,0vw) + var(--sway,0vw)), 50vh) rotate(calc(var(--rot,0deg) + 8deg))}
+    100%{transform:translate(calc(var(--x,0vw) + var(--sway,0vw)), 110vh) rotate(calc(var(--rot,0deg) + 12deg))}
+  }
+  /* Auto melt fade */
+  @keyframes melt{
+    0%{opacity:0}
+    10%{opacity:var(--op,.8)}
+    60%{opacity:var(--op,.8)}
+    100%{opacity:0}
+  }
+  /* Wrong-click melt */
+  .melt-click{ animation: meltClick 420ms ease-in forwards }
+  @keyframes meltClick{
+    0%{opacity:1;filter:none;transform:translateY(0) scale(1)}
+    60%{opacity:.5;filter:blur(2px);transform:translateY(8px) scale(.98)}
+    100%{opacity:0;filter:blur(6px);transform:translateY(18px) scale(.96)}
+  }
 
+  @media (prefers-reduced-motion: reduce){
+    .flake.animate{ animation-duration: calc(var(--life, var(--lifetime)) * 0.6) }
     @keyframes drift{
-      0%   { transform: translate(var(--x, 0vw), -12vh) rotate(var(--rot, 0deg)); }
-      50%  { transform: translate(calc(var(--x, 0vw) + var(--sway, 0vw)), 50vh) rotate(calc(var(--rot, 0deg) + 8deg)); }
-      100% { transform: translate(calc(var(--x, 0vw) + var(--sway, 0vw)), 110vh) rotate(calc(var(--rot, 0deg) + 12deg)); }
+      0%{transform:translate(var(--x,0vw), -12vh)}
+      100%{transform:translate(var(--x,0vw), 110vh)}
     }
-    @keyframes melt{
-      0%   { opacity: 0 }
-      10%  { opacity: var(--op, .8) }
-      60%  { opacity: var(--op, .8) }
-      100% { opacity: 0 }
-    }
+  }
 
-    /* Reduce motion accessibility */
-    @media (prefers-reduced-motion: reduce){
-      .flake.animate{ animation-duration: calc(var(--life, var(--lifetime)) * 0.6); }
-      @keyframes drift{
-        0%   { transform: translate(var(--x, 0vw), -12vh); }
-        100% { transform: translate(var(--x, 0vw), 110vh); }
-      }
-    }
-  </style>
+  /* Success screen */
+  #success{
+    position:fixed;inset:0;display:none;place-items:center;background:#0f172a;color:#e5f0ff
+  }
+  #success.active{display:grid}
+  #success .card{
+    padding:24px 28px;border:1px solid #3b82f620;border-radius:16px;background:#111827cc;backdrop-filter:blur(8px);
+    text-align:center; max-width: 520px;
+  }
+  #success h2{margin:0 0 8px;font-size:24px}
+  #success p{margin:0 0 14px;font-size:15px;color:#cfe1ff}
+  #success button{
+    margin-top:6px;border:1px solid #e5e7eb33;background:#e5e7eb10;color:#e5f0ff;padding:10px 14px;border-radius:10px;font-weight:600
+  }
+</style>
 </head>
 <body>
   <div id="field" aria-hidden="true"></div>
 
-  <script>
-    // Accent palette (soft-vivid on white)
-    const PALETTE = ['#3b82f6','#ef4444','#10b981','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#22c55e'];
+  <!-- Success overlay -->
+  <div id="success">
+    <div class="card">
+      <h2>🎉 You found the right match!</h2>
+      <p>Great eye. Want to try again?</p>
+      <button id="playAgain">Play again</button>
+    </div>
+  </div>
 
-    // Build a QR-looking SVG (21x21 modules) with some coloured modules
-    function makeQrSVG(module = 4, modules = 21, accent = '#3b82f6', accentRatio = 0.30){
-      const size = modules * module;
-      const NS = 'http://www.w3.org/2000/svg';
-      const svg = document.createElementNS(NS,'svg');
-      svg.setAttribute('width', size);
-      svg.setAttribute('height', size);
-      svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
-      svg.setAttribute('aria-hidden','true');
-      svg.style.display = 'block';
+<script>
+/* ==== CONFIG ==== */
+const PALETTE = [
+  ['#3b82f6','blue'], ['#ef4444','red'], ['#10b981','green'], ['#f59e0b','amber'],
+  ['#8b5cf6','violet'], ['#ec4899','pink'], ['#06b6d4','cyan'], ['#22c55e','lime']
+];
+let TARGET = PALETTE[Math.floor(Math.random()*PALETTE.length)]; // [hex,name]
 
-      const bg = document.createElementNS(NS,'rect');
-      bg.setAttribute('width', size); bg.setAttribute('height', size);
-      bg.setAttribute('fill', '#fff');
-      svg.appendChild(bg);
+/* ==== QR SVG (fake look) ==== */
+function makeQrSVG(module = 4, modules = 21, accent = '#3b82f6', accentRatio = 0.30){
+  const size = modules * module;
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS,'svg');
+  svg.setAttribute('width', size);
+  svg.setAttribute('height', size);
+  svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+  svg.setAttribute('aria-hidden','true');
+  svg.style.display = 'block';
 
-      const g = document.createElementNS(NS,'g');
-      const INK = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#111';
+  const bg = document.createElementNS(NS,'rect');
+  bg.setAttribute('width', size); bg.setAttribute('height', size);
+  bg.setAttribute('fill', '#fff');
+  svg.appendChild(bg);
 
-      const rect = (cx,cy,w,h,fill)=>{
-        const r = document.createElementNS(NS,'rect');
-        r.setAttribute('x', cx*module); r.setAttribute('y', cy*module);
-        r.setAttribute('width', w*module); r.setAttribute('height', h*module);
-        r.setAttribute('fill', fill);
-        g.appendChild(r);
-      };
+  const g = document.createElementNS(NS,'g');
+  const INK = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim() || '#111';
 
-      // Finder patterns (keep in INK for recognisability)
-      const finder = (ox,oy)=>{
-        rect(ox,oy,7,7, INK);
-        rect(ox+1,oy+1,5,5, '#fff');
-        rect(ox+2,oy+2,3,3, INK);
-      };
-      finder(0,0); finder(modules-7,0); finder(0,modules-7);
+  const rect = (cx,cy,w,h,fill)=>{
+    const r = document.createElementNS(NS,'rect');
+    r.setAttribute('x', cx*module); r.setAttribute('y', cy*module);
+    r.setAttribute('width', w*module); r.setAttribute('height', h*module);
+    r.setAttribute('fill', fill); g.appendChild(r);
+  };
 
-      // Timing patterns
-      for(let i=8;i<modules-8;i++){
-        if(i%2===0){ rect(i,6,1,1, INK); rect(6,i,1,1, INK); }
+  const finder = (ox,oy)=>{
+    rect(ox,oy,7,7, INK);
+    rect(ox+1,oy+1,5,5, '#fff');
+    rect(ox+2,oy+2,3,3, INK);
+  };
+  finder(0,0); finder(modules-7,0); finder(0,modules-7);
+
+  for(let i=8;i<modules-8;i++){
+    if(i%2===0){ rect(i,6,1,1, INK); rect(6,i,1,1, INK); }
+  }
+
+  const inFinderZone = (x,y)=>{
+    const z = (x<7 && y<7) || (x>=modules-7 && y<7) || (x<7 && y>=modules-7);
+    return z || x===6 || y===6;
+  };
+
+  for(let y=0;y<modules;y++){
+    for(let x=0;x<modules;x++){
+      if(inFinderZone(x,y)) continue;
+      if(Math.random()>0.62){
+        const fill = Math.random() < accentRatio ? accent : INK;
+        rect(x,y,1,1, fill);
       }
-
-      const inFinderZone = (x,y)=>{
-        const z = (x<7 && y<7) || (x>=modules-7 && y<7) || (x<7 && y>=modules-7);
-        return z || x===6 || y===6; // also skip timing lines
-      };
-
-      for(let y=0;y<modules;y++){
-        for(let x=0;x<modules;x++){
-          if(inFinderZone(x,y)) continue;
-          if(Math.random()>0.62){
-            const fill = Math.random() < accentRatio ? accent : INK;
-            rect(x,y,1,1, fill);
-          }
-        }
-      }
-
-      svg.appendChild(g);
-      return svg;
     }
+  }
 
-    // Create a single half-QR flake (top or bottom half only)
-    function makeHalfQrFlake(){
-      const flake = document.createElement('div');
-      flake.className = 'flake';
+  svg.appendChild(g);
+  return svg;
+}
 
-      // Size + accent
-      const module = Math.floor(3 + Math.random()*3); // 3..5 px per module
-      const size   = 21 * module;                      // full SVG size
-      const accent = PALETTE[Math.floor(Math.random()*PALETTE.length)];
-      const svg    = makeQrSVG(module, 21, accent, 0.30);
+/* ==== Flake factory (top/bottom halves only) ==== */
+function makeHalfQrFlake(){
+  const flake = document.createElement('div');
+  flake.className = 'flake';
 
-      // Crop to TOP or BOTTOM half using the flake as a mask (robust across browsers)
-      const topHalf = Math.random() < 0.5;
-      flake.style.width  = size + 'px';
-      flake.style.height = (size/2) + 'px';
-      flake.style.overflow = 'hidden';
-      if(!topHalf){
-        svg.style.transform = `translateY(-${size/2}px)`; // show bottom half
-      }
-      flake.appendChild(svg);
+  const module = Math.floor(3 + Math.random()*3); // 3..5 px per module
+  // 20% chance to use the target accent → hidden rule
+  const useTarget = Math.random() < 0.2;
+  const [accentHex] = useTarget ? TARGET : PALETTE[Math.floor(Math.random()*PALETTE.length)];
+  const svg = makeQrSVG(module, 21, accentHex, 0.30);
 
-      // Motion variables
-      const rot  = (Math.random()*24 - 12).toFixed(2) + 'deg';
-      const op   = (0.45 + Math.random()*0.4).toFixed(2);
-      const xvw  = (Math.random()*100).toFixed(2) + 'vw';
-      const sway = ((Math.random()>0.5? 1.2 : -1.2) * (0.6 + Math.random())).toFixed(2) + 'vw';
+  // Mark accent on element for click logic
+  flake.dataset.accent = accentHex;
 
-      flake.style.setProperty('--x', xvw);
-      flake.style.setProperty('--sway', sway);
-      flake.style.setProperty('--rot', rot);
-      flake.style.setProperty('--op', op);
-      flake.style.setProperty('--life', getComputedStyle(document.documentElement).getPropertyValue('--lifetime').trim() || '10s');
+  // Crop to TOP or BOTTOM half via wrapper dimensions (Safari-safe)
+  const size = 21 * module;
+  flake.style.width = size + 'px';
+  flake.style.height = (size/2) + 'px';
+  flake.style.overflow = 'hidden';
+  const topHalf = Math.random() < 0.5;
+  if(!topHalf){ svg.style.transform = `translateY(-${size/2}px)`; }
+  flake.appendChild(svg);
 
-      // Start placement (above viewport)
-      flake.style.transform = `translate(${xvw}, -12vh) rotate(${rot})`;
-      flake.style.opacity = 0;
+  // Motion vars
+  const rot  = (Math.random()*24 - 12).toFixed(2) + 'deg';
+  const op   = (0.45 + Math.random()*0.4).toFixed(2);
+  const xvw  = (Math.random()*100).toFixed(2) + 'vw';
+  const sway = ((Math.random()>0.5? 1.0 : -1.0) * (0.5 + Math.random())).toFixed(2) + 'vw';
 
-      return flake;
-    }
+  flake.style.setProperty('--x', xvw);
+  flake.style.setProperty('--sway', sway);
+  flake.style.setProperty('--rot', rot);
+  flake.style.setProperty('--op', op);
+  flake.style.setProperty('--life', getComputedStyle(document.documentElement).getPropertyValue('--lifetime').trim() || '10s');
 
-    const field = document.getElementById('field');
-    let count = 0;
+  flake.style.transform = `translate(${xvw}, -12vh) rotate(${rot})`;
+  flake.style.opacity = 0;
 
-    function spawn(){
-      const max = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--max-flakes')) || 36;
-      if(count >= max) return;
+  return flake;
+}
 
-      const flake = makeHalfQrFlake();
-      field.appendChild(flake);
-      requestAnimationFrame(()=>{ flake.classList.add('animate'); });
-      count++;
+/* ==== Game loop ==== */
+const field = document.getElementById('field');
+const success = document.getElementById('success');
+const playAgain = document.getElementById('playAgain');
+let count = 0;
+let spawner = null;
 
-      // Auto-remove after lifetime (+tiny buffer so last frame paints)
-      const lifeMs = 10000 + 200;
-      setTimeout(()=>{ try{flake.remove();}catch{} count = Math.max(0, count-1); }, lifeMs);
-    }
+function spawn(){
+  const max = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--max-flakes')) || 12;
+  if(count >= max) return;
+  const flake = makeHalfQrFlake();
+  field.appendChild(flake);
+  requestAnimationFrame(()=>flake.classList.add('animate'));
+  count++;
+  // Auto-remove after ~10s (+buffer)
+  setTimeout(()=>{ try{flake.remove();}catch{} count = Math.max(0, count-1); }, 10200);
+}
 
-    // Spawn loop
-    const spawnEveryMs = 180; // how often we try to add a flake
-    setInterval(()=>{
-      spawn();
-      if(Math.random() < 0.08) spawn(); // occasional extra
-    }, spawnEveryMs);
+/* Slower spawn: every ~900ms + rare extra */
+function startSpawning(){
+  stopSpawning();
+  spawner = setInterval(()=>{
+    spawn();
+    if(Math.random() < 0.03) spawn(); // small chance of extra
+  }, 900);
+}
+function stopSpawning(){
+  if(spawner){ clearInterval(spawner); spawner = null; }
+}
 
-    // Click: remove just the clicked flake (don’t spawn)
-    field.addEventListener('click', (e)=>{
-      const fl = e.target.closest && e.target.closest('.flake');
-      if(fl){
-        try{ fl.remove(); }catch{}
-        count = Math.max(0, count-1);
-        return;
-      }
-      // clicked empty space -> optional burst:
-      for(let i=0;i<6;i++) setTimeout(spawn, i*40);
-    });
-  </script>
+/* Click handling: correct hidden colour → success; else melt just that flake */
+field.addEventListener('click', (e)=>{
+  const fl = e.target.closest && e.target.closest('.flake');
+  if(!fl) return;
+  const isCorrect = (fl.dataset.accent || '').toLowerCase() === TARGET[0].toLowerCase();
+  if(isCorrect){
+    onSuccess();
+  }else{
+    fl.classList.add('melt-click');
+    setTimeout(()=>{ try{fl.remove();}catch{} count = Math.max(0, count-1); }, 420);
+  }
+});
+
+/* Success → change screen */
+function onSuccess(){
+  stopSpawning();
+  success.classList.add('active');
+  // Optionally: clear remaining flakes after a beat
+  setTimeout(()=>{ document.querySelectorAll('.flake').forEach(n=>n.remove()); count = 0; }, 300);
+}
+
+/* Play again: pick a new hidden target and resume */
+playAgain.addEventListener('click', ()=>{
+  success.classList.remove('active');
+  TARGET = PALETTE[Math.floor(Math.random()*PALETTE.length)];
+  startSpawning();
+});
+
+/* Init */
+startSpawning();
+</script>
 </body>
 </html>
+
 
